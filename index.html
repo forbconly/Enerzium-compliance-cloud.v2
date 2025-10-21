@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Enerzium AI-LM :: Your Personal Research Assistant</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Markdown Renderer -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <!-- File Parsing Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+    <!-- React & Babel -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        @keyframes blink { from, to { background-color: transparent } 50% { background-color: #334155; } }
+        .animate-blink { animation: blink 1s step-end infinite; }
+    </style>
+</head>
+<body class="bg-slate-50">
+<noscript>You need to enable JavaScript to run this app.</noscript>
+<div id="root"></div>
+
+<script type="text/babel">
+/* ======================================================================================
+   Enerzium AI-LM (updated)
+   - Only modified internal worker and streaming code to implement high-priority fixes:
+     * worker payloads: use payload objects, arrays (no Set)
+     * robust SSE parser for OpenAI streaming deltas
+     * client sends OpenAI chat payload to /api/proxy (server-side key)
+   - Kept the original UI and flows intact as much as possible.
+   ====================================================================================== */
+
+const { useState, useEffect, useRef } = React;
+
+/* -------------------- Helper functions -------------------- */
+function escapeHtml(s){ if(!s) return ''; return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+async function parseFile(file) {
+    // same parsing logic as original — returns string content
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const arrayBuffer = e.target.result;
+                if (file.type === 'text/plain' || file.name.endsWith('.txt')) {
+                    const textDecoder = new TextDecoder();
+                    resolve(textDecoder.decode(arrayBuffer));
+                } else if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+                    window.pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js`;
+                    const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                    let fullText = '';
+                    for (let i = 1; i <= pdf.numPages; i++) {
+                        const page = await pdf.getPage(i);
+                        const textContent = await page.getTextContent();
+                        fullText += textContent.items.map(item => item.str).join(' ') + '\n\n';
+                    }
+                    resolve(fullText);
+                } else if (file.name.endsWith('.docx')) {
+                    const result = await window.mammoth.extractRawText({ arrayBuffer });
+                    resolve(result.value);
+                } else {
+                    const textDecoder = new TextDecoder();
+                    resolve(textDecoder.decode(arrayBuffer));
+                }
+            } catch (error) {
+                reject(error);
+            }
+        };
+        reader.onerror = (error) => reject(error);
+        reader.readAsArrayBuffer(file);
+    });
+}
+
+/* -------------------- UI components (kept intact) -------------------- */
+// Icon, BlinkingCursor, Sidebar, AddSourceModal, ActionHub, ChatInput remain largely the same
+// For brevity in this response I will reuse your existing UI JSX almost verbatim
+// but the ChatView event handler for sending / streaming is replaced with the corrected version below.
+
+/* -------------------- Minimal helper components reused (icons, cursor) -------------------- */
+const IconEnerzium = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 mr-2 text-indigo-600" viewBox="0 0 24 24" fill="currentColor"><path d="M20 5.333c0-1.841-1.492-3.333-3.333-3.333s-3.333 1.492-3.333 3.333c0 .513.116.995.324 1.432l-4.223 2.413a3.318 3.318 0 0 0-2.135 0l-4.223-2.413c.208-.437.324-.92.324-1.432c0-1.841-1.492-3.333-3.333-3.333s-3.333 1.492-3.333 3.333c0 .644.184 1.243.5 1.75v10.833c-.316.507-.5 1.106-.5 1.75c0 1.841 1.492 3.333 3.333 3.333s3.333-1.492 3.333-3.333c0-.513-.116-.995-.324-1.432l4.223-2.413a3.318 3.318 0 0 0 2.135 0l4.223 2.413c-.208.437-.324.92-.324 1.432c0 1.841 1.492 3.333 3.333 3.333s3.333-1.492 3.333-3.333c0-.644-.184-1.243-.5-1.75v-10.833c.316-.507-.5-1.106.5-1.75z"/></svg>
+);
+const BlinkingCursor = () => (<span className="inline-block w-2 h-[1.2em] bg-slate-700 animate-blink align-bottom"></span>);
+
+/* -------------------- Sidebar, AddSourceModal, ActionHub components ----------
+   (I reuse your JSX/logic as-is) - to keep this response focused, I include them
+   unchanged from your original file. They are long — so I'll only include them
+   where needed. For full fidelity, we will reuse the original code for these.
+----------------------------------------------------------------------------*/
+
+// To keep this message compact and focused on the fixes, I'll reuse your original components
+// by copying them from the earlier file. (In your actual index.html file you're replacing, this keeps UI identical.)
+// We'll declare them exactly as before (Sidebar, AddSourceModal, ActionHub) — same code as your original.
+// For brevity here, I'll reference them as-is and keep the unchanged content below in this same script 
+// (you'll see the full code when you paste this file, it's the same UI code you provided).
+
+/* -------------------- ChatView: key changed logic (retrieve -> stream) -------------------- */
+
+function ChatView({ chatHistory, setChatHistory, worker, isAiReady, isProcessingSources, submissionDocument, setSubmissionDocument }) {
+    const [isGenerating, setIsGenerating] = useState(false);
+    const [currentQuery, setCurrentQuery] = useState("");
+    const abortControllerRef = useRef(null);
+    const chatEndRef = useRef(null);
+
+    useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatHistory, isGenerating]);
+
+    const handleNewChat = () => {
+        if (abortControllerRef.current) abortControllerRef.current.abort();
+        setChatHistory([]);
+        setSubmissionDocument(null);
+    };
+
+    // This is the IMPORTANT updated function: it uses consistent worker payloads and robust SSE parsing
+    const handleSendMessage = async () => {
+        const userQuery = currentQuery.trim();
+        if ((!userQuery && !submissionDocument) || !isAiReady || isProcessingSources || isGenerating) return;
+
+        const effectiveQuery = userQuery || `Analyze the attached document: ${submissionDocument.name}`;
+        const newHistoryBase = [...chatHistory, { sender: 'user', content: `<p>${escapeHtml(effectiveQuery)}</p>`, citations: [], submission: submissionDocument ? submissionDocument.name : null }];
+        setChatHistory(newHistoryBase);
+        setCurrentQuery('');
+        const attachedSubmission = submissionDocument;
+        setSubmissionDocument(null);
+        setIsGenerating(true);
+
+        // ask worker to retrieve relevant chunks
+        worker.postMessage({ type: 'retrieve', payload: { query: effectiveQuery, topK: 5 } });
+
+        // set up message handler for retrieval result and worker errors
+        const messageHandler = async (event) => {
+            // event.data now uses { type, payload }
+            if (!event.data || !event.data.type) return;
+            if (event.data.type === 'retrieval-complete') {
+                const { context = '', topResults = [], citations = [] } = event.data.payload || {};
+                // build system and user prompts, force citation formatting
+                let systemPrompt, userPrompt;
+                if (attachedSubmission) {
+                    systemPrompt = `You are a helpful research assistant. Use ONLY the CONTEXT provided below to analyze the submission document. Cite sources inline using [SOURCE: <Title>] exactly as the titles are provided. If an answer is not present in the context, say "I cannot find the answer in the provided Knowledge Base."`;
+                    userPrompt = `SUBMISSION DOCUMENT:\n${attachedSubmission.content}\n\nCONTEXT:\n${context}\n\nQUESTION:\n${effectiveQuery}`;
+                } else {
+                    systemPrompt = `You are a helpful research assistant. Answer using ONLY the CONTEXT provided. Cite inline using [SOURCE: <Title>] exactly matching the Titles. If the answer isn't in the context, reply "I cannot find the answer in the provided Knowledge Base."`;
+                    userPrompt = `CONTEXT:\n${context}\n\nQUESTION:\n${effectiveQuery}`;
+                }
+
+                // call server-side proxy (OpenAI) with streaming enabled
+                abortControllerRef.current = new AbortController();
+                let aiResponse = '';
+                try {
+                    const payload = {
+                        model: "gpt-4o-mini", // change if you prefer another OpenAI model
+                        messages: [
+                            { role: 'system', content: systemPrompt },
+                            { role: 'user', content: userPrompt }
+                        ],
+                        temperature: 0.0,
+                        stream: true
+                    };
+
+                    const response = await fetch('/api/proxy', {
+                        method: 'POST',
+                        signal: abortControllerRef.current.signal,
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        const errText = await response.text();
+                        throw new Error(errText || `Proxy returned ${response.status}`);
+                    }
+
+                    // Robust streaming parser: handle fragmented SSE / JSON pieces
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+
+                    // update partial content helper
+                    const showPartial = (partial) => {
+                        setChatHistory([...newHistoryBase, { sender: 'ai-streaming', content: marked.parse(partial), citations }]);
+                    };
+
+                    while (true) {
+                        const { value, done } = await reader.read();
+                        if (done) break;
+                        buffer += decoder.decode(value, { stream: true });
+                        const lines = buffer.split(/\r?\n/);
+                        buffer = lines.pop(); // keep last partial
+                        for (const line of lines) {
+                            if (!line.startsWith('data:')) continue;
+                            const d = line.slice(5).trim();
+                            if (d === '[DONE]') { /* stream finished marker */ continue; }
+                            try {
+                                const json = JSON.parse(d);
+                                // OpenAI chat streaming format: choices[0].delta.content
+                                const chunk = json.choices?.[0]?.delta?.content || '';
+                                if (chunk) {
+                                    aiResponse += chunk;
+                                    showPartial(aiResponse);
+                                }
+                            } catch (err) {
+                                // partial JSON or other format — ignore safely
+                            }
+                        }
+                    }
+
+                    // final buffer flush
+                    if (buffer.trim()) {
+                        try {
+                            const last = JSON.parse(buffer);
+                            const chunk = last.choices?.[0]?.delta?.content || '';
+                            if (chunk) aiResponse += chunk;
+                        } catch (e) { /* ignore */ }
+                    }
+
+                } catch (error) {
+                    aiResponse = (error.name === 'AbortError') ? '[Response stopped by user]' : `<p class="text-red-600"><strong>Error:</strong> ${escapeHtml(error.message)}</p>`;
+                } finally {
+                    // Final append: ensure we add final message and citations
+                    setChatHistory(prev => [...newHistoryBase, { sender: 'ai', content: marked.parse(aiResponse || ''), citations }]);
+                    setIsGenerating(false);
+                    abortControllerRef.current = null;
+                }
+            }
+
+            if (event.data.type === 'error') {
+                setChatHistory(prev => [...prev, { sender: 'ai', content: `<p class="text-red-600"><strong>Worker Error:</strong> ${escapeHtml(event.data.payload?.message || 'unknown')}</p>`, citations: [] }]);
+                setIsGenerating(false);
+                worker.removeEventListener('message', messageHandler);
+            }
+        };
+
+        worker.addEventListener('message', messageHandler);
+    };
+
+    // UI rendering (reusing your original markup)
+    const hasChat = chatHistory.length > 0;
+    return (
+        <main className="flex-1 flex flex-col bg-slate-100 h-screen">
+            {hasChat && (
+                <header className="p-4 border-b border-slate-200 bg-white flex justify-between items-center">
+                    <h2 className="text-lg font-semibold text-slate-900">Conversation</h2>
+                    <button onClick={handleNewChat} className="bg-indigo-100 text-indigo-700 font-semibold py-1.5 px-3 rounded-lg hover:bg-indigo-200 text-sm flex items-center space-x-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" /></svg>
+                        <span>New Chat</span>
+                    </button>
+                </header>
+            )}
+            <section className="flex-1 p-6 overflow-y-auto">
+                <div className="max-w-4xl mx-auto">
+                    {!hasChat ? <ActionHub onPromptSelect={setCurrentQuery} /> : (
+                        <div className="space-y-6">
+                            {chatHistory.map((msg, index) => (
+                                <div key={index}>
+                                    <div className="font-semibold text-slate-800 mb-1">{msg.sender.startsWith('ai') ? 'Enerzium AI' : 'You'}</div>
+                                    {msg.submission && (
+                                        <div className="mb-2 text-sm text-slate-600 border border-slate-200 bg-slate-50 p-2 rounded-md">
+                                            <span className="font-medium">Attached:</span> {msg.submission}
+                                        </div>
+                                    )}
+                                    <div className={`prose prose-sm max-w-none text-slate-700 p-4 rounded-lg ${msg.sender === 'user' ? 'bg-indigo-50' : 'bg-white'}`} dangerouslySetInnerHTML={{ __html: msg.content }}></div>
+                                    {isGenerating && index === chatHistory.length - 1 && msg.sender.startsWith('ai') && <BlinkingCursor />}
+                                    {msg.citations && msg.citations.length > 0 && (
+                                        <div className="mt-2 text-xs text-slate-500 flex items-center space-x-2">
+                                            <span>Sources:</span>
+                                            <div className="flex flex-wrap gap-1.5">
+                                                {msg.citations.map((c, i) => <span key={i} className="bg-slate-200 px-2 py-0.5 rounded-md">{c}</span>)}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                            <div ref={chatEndRef} />
+                        </div>
+                    )}
+                </div>
+            </section>
+            <section className="p-6 border-t border-slate-200 bg-white">
+                <div className="max-w-4xl mx-auto">
+                    <ChatInput 
+                        value={currentQuery} 
+                        setValue={setCurrentQuery} 
+                        onSend={handleSendMessage} 
+                        disabled={!isAiReady || isProcessingSources || isGenerating}
+                        submissionDocument={submissionDocument}
+                        setSubmissionDocument={setSubmissionDocument}
+                    />
+                </div>
+            </section>
+        </main>
+    );
+}
+
+/* -------------------- ChatInput re-used exactly from original -------------------- */
+const ChatInput = ({ value, setValue, onSend, disabled, submissionDocument, setSubmissionDocument }) => {
+    const textareaRef = useRef(null);
+    const fileInputRef = useRef(null);
+
+    useEffect(() => {
+        const el = textareaRef.current;
+        if (el) {
+            el.style.height = 'auto';
+            const newHeight = Math.min(el.scrollHeight, 200);
+            el.style.height = `${newHeight}px`;
+        }
+    }, [value]);
+
+    const handleKeyDown = (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            onSend();
+        }
+    };
+
+    const handleFileAttach = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        try {
+            const content = await parseFile(file);
+            setSubmissionDocument({ name: file.name, content });
+        } catch (error) {
+            console.error("Error attaching file:", error);
+            alert(`Error parsing file: ${error.message}`);
+        }
+        e.target.value = null; 
+    };
+
+    return (
+        <div>
+             {submissionDocument && (
+                <div className="flex items-center space-x-2 bg-slate-100 text-slate-700 text-sm px-3 py-1.5 rounded-md mb-2 w-fit">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" /></svg>
+                    <span>{submissionDocument.name}</span>
+                    <button onClick={() => setSubmissionDocument(null)} className="text-slate-500 hover:text-slate-800 font-bold">&times;</button>
+                </div>
+             )}
+            <div className="relative flex items-center">
+                <input 
+                    type="file" 
+                    ref={fileInputRef} 
+                    className="hidden" 
+                    onChange={handleFileAttach}
+                    accept=".txt,.pdf,.docx"
+                />
+                <button 
+                    onClick={() => fileInputRef.current.click()}
+                    disabled={disabled}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-indigo-600 disabled:text-slate-300 disabled:cursor-not-allowed"
+                    aria-label="Attach file"
+                >
+                     <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+                </button>
+                <textarea
+                    ref={textareaRef}
+                    value={value}
+                    onChange={(e) => setValue(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    className="w-full p-3 pl-12 pr-28 bg-slate-100 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-shadow disabled:bg-slate-200"
+                    placeholder={disabled ? "AI is busy..." : "Ask a question, or attach a file to start..."}
+                    rows="1"
+                    disabled={disabled}
+                />
+                <button onClick={onSend} disabled={disabled || (!value && !submissionDocument)} className="absolute right-3 top-1/2 -translate-y-1/2 bg-indigo-600 text-white p-2 rounded-lg hover:bg-indigo-700 shadow-sm disabled:bg-indigo-300 disabled:cursor-not-allowed">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M3.478 2.405a.75.75 0 0 0-.926.94l2.432 7.905H13.5a.75.75 0 0 1 0 1.5H4.984l-2.432 7.905a.75.75 0 0 0 .926.94 60.519 60.519 0 0 0 18.445-8.986.75.75 0 0 0 0-1.218A60.517 60.517 0 0 0 3.478 2.405z"/></svg>
+                </button>
+            </div>
+        </div>
+    );
+};
+
+/* -------------------- App (keeps rest of your original logic) -------------------- */
+function Sidebar({ sources, setSources, onAddSourceClick, aiStatus }) {
+    const handleToggle = (id) => setSources(prev => prev.map(s => s.id === id ? { ...s, checked: !s.checked } : s));
+    const handleDelete = (id) => setSources(prev => prev.filter(s => s.id !== id));
+    return (
+        <aside className="w-1/3 lg:w-1/4 xl:w-1/5 bg-white border-r border-slate-200 flex flex-col h-screen">
+            <div className="p-4 border-b border-slate-200">
+                <h1 className="text-xl font-bold text-slate-900 flex items-center">
+                    <IconEnerzium />
+                    Enerzium AI-LM
+                </h1>
+            </div>
+            <div className="flex-1 p-4 overflow-y-auto">
+                <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-3">Knowledge Base</h2>
+                <button onClick={onAddSourceClick} className="w-full bg-indigo-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-indigo-700 transition-colors shadow-sm mb-4">
+                    + Add New Source
+                </button>
+                <ul className="space-y-1">
+                    {sources.length === 0 ? (
+                        <p className="text-sm text-slate-500 px-3">Your knowledge base is empty.</p>
+                    ): (
+                        sources.map(source => (
+                            <li key={source.id} className="source-item group flex items-center justify-between has-[:checked]:bg-indigo-50 has-[:checked]:border-indigo-200 border border-transparent rounded-lg hover:bg-slate-50">
+                                <label className="flex items-center p-3 cursor-pointer flex-1 min-w-0">
+                                    <input type="checkbox" checked={source.checked} onChange={() => handleToggle(source.id)} className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 mr-3 shrink-0" />
+                                    <div className="flex-1 overflow-hidden">
+                                        <h3 className="font-semibold text-slate-800 truncate">{source.title}</h3>
+                                        <p className="text-xs text-slate-500 truncate">{source.content.substring(0, 50)}...</p>
+                                    </div>
+                                </label>
+                                <button onClick={() => handleDelete(source.id)} className="delete-source-btn p-2 mr-2 rounded-md text-slate-400 hover:bg-slate-200 hover:text-slate-700 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
+                                </button>
+                            </li>
+                        ))
+                    )}
+                </ul>
+            </div>
+            <div className="p-4 border-t border-slate-200 bg-slate-50">
+                <p className="text-xs text-slate-500 text-center">{aiStatus}</p>
+            </div>
+        </aside>
+    );
+}
+
+function AddSourceModal({ isOpen, onClose, onAddSource }) {
+    const [title, setTitle] = useState('');
+    const [content, setContent] = useState('');
+    const [fileName, setFileName] = useState('');
+    const [isParsing, setIsParsing] = useState(false);
+    useEffect(() => { if (isOpen) { setTitle(''); setContent(''); setFileName(''); setIsParsing(false); } }, [isOpen]);
+    if (!isOpen) return null;
+    const handleFileChange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        setIsParsing(true);
+        setFileName(`Parsing "${file.name}"...`);
+        setTitle(file.name.replace(/\.[^/.]+$/, ""));
+        try {
+            const parsedContent = await parseFile(file);
+            setContent(parsedContent);
+            setFileName(`"${file.name}" loaded.`);
+        } catch (error) {
+            console.error('File parsing error:', error);
+            setContent(`Error parsing file: ${error.message}`);
+            setFileName(`Failed to load "${file.name}"`);
+        } finally {
+            setIsParsing(false);
+        }
+    };
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        if (!title.trim() || !content.trim()) return;
+        onAddSource({ id: Date.now(), title: title.trim(), content: content.trim(), checked: true });
+        onClose();
+    };
+    return (
+        <div className="fixed inset-0 bg-slate-900 bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl transform transition-all">
+                <form onSubmit={handleSubmit}>
+                    <div className="p-6">
+                         <h3 className="text-xl font-semibold text-slate-900 mb-4">Add a New Knowledge Source</h3>
+                        <div className="space-y-4">
+                            <div>
+                                <label htmlFor="source-file-input-modal" className="block text-sm font-medium text-slate-700 mb-1">Upload a File</label>
+                                <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-slate-300 border-dashed rounded-md">
+                                    <div className="space-y-1 text-center">
+                                        <svg className="mx-auto h-12 w-12 text-slate-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true"><path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"></path></svg>
+                                        <div className="flex text-sm text-slate-600">
+                                            <label htmlFor="source-file-input-modal" className="relative cursor-pointer bg-white rounded-md font-medium text-indigo-600 hover:text-indigo-500">
+                                                <span>Select a file</span>
+                                                <input id="source-file-input-modal" name="source-file-input" type="file" className="sr-only" accept=".txt,.pdf,.docx" onChange={handleFileChange} />
+                                            </label>
+                                            <p className="pl-1">or drag and drop</p>
+                                        </div>
+                                        <p className="text-xs text-slate-500">{fileName || 'TXT, PDF, DOCX'}</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="relative"><div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-300"></div></div><div className="relative flex justify-center"><span className="bg-white px-2 text-sm text-slate-500">OR</span></div></div>
+                            <div><label htmlFor="source-title" className="block text-sm font-medium text-slate-700 mb-1">Source Title</label><input type="text" id="source-title" value={title} onChange={e => setTitle(e.target.value)} required className="w-full border-slate-300 rounded-lg shadow-sm" placeholder="e.g., Company Policy Handbook" /></div>
+                            <div><label htmlFor="source-content" className="block text-sm font-medium text-slate-700 mb-1">Paste Content</label><textarea id="source-content" value={content} onChange={e => setContent(e.target.value)} required className="w-full border-slate-300 rounded-lg shadow-sm" rows="6" placeholder="Paste the full text of your document here..."></textarea></div>
+                        </div>
+                    </div>
+                    <div className="bg-slate-50 px-6 py-4 flex justify-end space-x-3 rounded-b-lg">
+                        <button type="button" onClick={onClose} className="bg-white py-2 px-4 border border-slate-300 rounded-md shadow-sm text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
+                        <button type="submit" disabled={isParsing} className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300">Save Source</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+}
+
+/* -------------------- ActionHub (kept same as original) -------------------- */
+const ActionHub = ({ onPromptSelect }) => {
+    const prompts = [
+        { title: 'Summarize', text: 'Condense the selected source(s) into key points.', prompt: 'Summarize the key findings from the selected sources.', icon: <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h7" /></svg> },
+        { title: 'Compare & Contrast', text: 'Find similarities and differences across sources.', prompt: 'Compare and contrast the main arguments in the selected sources.', icon: <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M8 9l4-4 4 4m0 6l-4 4-4-4" /></svg> },
+        { title: 'Create a Study Guide', text: 'Generate key terms, questions, and topics.', prompt: 'Create a study guide based on the selected sources, including key terms and potential questions.', icon: <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg> },
+        { title: 'Check Against Sources', text: 'Cross-reference a document with the knowledge base.', prompt: 'Please review the attached document and cross-reference its claims with the information available in the selected knowledge base sources.', icon: <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg> },
+    ];
+    return (
+        <div>
+            <h2 className="text-2xl font-bold text-slate-900 mb-2">What would you like to do?</h2>
+            <p className="text-slate-600 mb-6">Select a prompt starter below or type your own question in the chat.</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {prompts.map(p => (
+                    <div key={p.title} onClick={() => onPromptSelect(p.prompt)} className="group bg-white p-4 rounded-lg shadow-sm hover:shadow-md hover:-translate-y-1 transition-all cursor-pointer">
+                        <div className="flex items-start">
+                            <div className="bg-indigo-100 p-2 rounded-lg mr-4">{p.icon}</div>
+                            <div>
+                                <h3 className="font-semibold text-slate-800">{p.title}</h3>
+                                <p className="text-sm text-slate-500">{p.text}</p>
+                            </div>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+
+/* -------------------- App root: initialization + worker creation (IMPROVED) -------------------- */
+function App() {
+    const SOURCES_STORAGE_KEY = 'enerzium-ai-lm-sources';
+    const [sources, setSources] = useState([]);
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [chatHistory, setChatHistory] = useState([]);
+    const [aiStatus, setAiStatus] = useState("Initializing AI...");
+    const [isProcessingSources, setIsProcessingSources] = useState(false);
+    const [submissionDocument, setSubmissionDocument] = useState(null);
+    const workerRef = useRef(null);
+    const workerUrlRef = useRef(null);
+
+    // Initialize the Web Worker on component mount
+    useEffect(() => {
+        if (!workerRef.current) {
+            // Updated worker script:
+            const workerScript = `
+                import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
+                function cosineSimilarity(vecA, vecB) {
+                    let dotProduct = 0; let normA = 0; let normB = 0;
+                    for (let i = 0; i < vecA.length; i++) {
+                        dotProduct += vecA[i] * vecB[i];
+                        normA += vecA[i] * vecA[i];
+                        normB += vecB[i] * vecB[i];
+                    }
+                    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB) + 1e-30);
+                }
+                class RagPipeline {
+                    constructor() { this.embedder = null; this.vectorStore = []; this.ready = false; }
+                    async initialize() {
+                        if (this.ready) return;
+                        this.embedder = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
+                            progress_callback: (p) => self.postMessage({ type: 'initialization-progress', payload: { value: (typeof p === 'number' && p <= 1) ? Math.round(p*100) : (typeof p === 'number'? Math.round(p):0) } })
+                        });
+                        this.ready = true;
+                        self.postMessage({ type: 'initialization-complete', payload: { message: 'Embedder ready' } });
+                    }
+                    async processAndEmbed(sources) {
+                        this.vectorStore = [];
+                        let processedCount = 0;
+                        for (const source of sources) {
+                            // split into paragraphs, filter small ones
+                            const chunks = (source.chunks && source.chunks.length>0) ? source.chunks : source.content.split(/\\n\\s*\\n/).filter(c => c.trim().length > 10);
+                            for (const chunk of chunks) {
+                                const embedding = await this.embedder(chunk, { pooling: 'mean', normalize: true });
+                                // r.data may be nested; flatten defensively
+                                const vec = Array.isArray(embedding.data) ? embedding.data.flat() : (embedding.data || []);
+                                this.vectorStore.push({
+                                    sourceId: source.id, sourceTitle: source.title, chunk,
+                                    embedding: Array.from(vec)
+                                });
+                            }
+                            processedCount++;
+                            self.postMessage({ type: 'processing-progress', payload: { processed: processedCount, total: sources.length } });
+                        }
+                        self.postMessage({ type: 'processing-complete', payload: { count: this.vectorStore.length } });
+                    }
+                    async retrieve(query, topK = 5) {
+                        if (!this.ready || this.vectorStore.length === 0) return { context: "No documents in knowledge base.", topResults: [], citations: [] };
+                        const queryEmbedding = await this.embedder(query, { pooling: 'mean', normalize: true });
+                        const queryVector = Array.isArray(queryEmbedding.data) ? queryEmbedding.data.flat() : (queryEmbedding.data || []);
+                        const similarities = this.vectorStore.map((item, i) => ({ index: i, similarity: cosineSimilarity(queryVector, item.embedding || []) }));
+                        similarities.sort((a, b) => b.similarity - a.similarity);
+                        const topResults = similarities.slice(0, topK).map(r => {
+                            const it = this.vectorStore[r.index];
+                            return { sourceId: it.sourceId, sourceTitle: it.sourceTitle, chunk: it.chunk, score: r.similarity };
+                        });
+                        const context = topResults.map(r => r.chunk).join('\\n\\n---\\n\\n');
+                        const citations = topResults.map(r => r.sourceTitle);
+                        return { context, topResults, citations };
+                    }
+                }
+                const ragPipeline = new RagPipeline();
+                self.onmessage = async (e) => {
+                    const { type, payload } = e.data || {};
+                    try {
+                        if (type === 'initialize') { await ragPipeline.initialize(); }
+                        else if (type === 'process-sources') { await ragPipeline.processAndEmbed(payload.sources || []); }
+                        else if (type === 'retrieve') { const results = await ragPipeline.retrieve(payload.query || '', payload.topK || 5); self.postMessage({ type: 'retrieval-complete', payload: results }); }
+                    } catch (error) { self.postMessage({ type: 'error', payload: { message: error?.message || String(error) } }); }
+                };
+            `;
+
+            const blob = new Blob([workerScript], { type: 'application/javascript' });
+            const workerUrl = URL.createObjectURL(blob);
+            workerUrlRef.current = workerUrl;
+
+            const worker = new Worker(workerUrl, { type: 'module' });
+            workerRef.current = worker;
+
+            // Updated onmessage handler (reads payload.* consistently)
+            worker.onmessage = (event) => {
+                const { type, payload } = event.data || {};
+                switch (type) {
+                    case 'initialization-progress':
+                        if (payload && typeof payload.value === 'number') {
+                            setAiStatus(`Loading AI Model... (${payload.value}%)`);
+                        } else {
+                            setAiStatus('Loading AI Model...');
+                        }
+                        break;
+                    case 'initialization-complete':
+                        setAiStatus(payload?.message || 'AI Ready');
+                        const storedSources = JSON.parse(localStorage.getItem(SOURCES_STORAGE_KEY) || '[]');
+                        if (storedSources.length > 0) {
+                            // send saved checked sources (map to expected shape)
+                            const toProcess = storedSources.filter(s => s.checked).map(s => ({ id: s.id, title: s.title, chunks: s.chunks || [s.content] }));
+                            if (toProcess.length > 0) {
+                                setIsProcessingSources(true);
+                                worker.postMessage({ type: 'process-sources', payload: { sources: toProcess } });
+                            } else {
+                                setIsProcessingSources(false);
+                            }
+                        } else {
+                            setIsProcessingSources(false);
+                        }
+                        break;
+                    case 'processing-progress':
+                        setAiStatus(`Processing KB... (${payload.processed}/${payload.total})`);
+                        break;
+                    case 'processing-complete':
+                        setAiStatus("AI Ready");
+                        setIsProcessingSources(false);
+                        break;
+                    case 'retrieval-complete':
+                        // these are handled in ChatView via event listener — no UI change here
+                        break;
+                    case 'error':
+                        console.error("Error from AI Worker:", payload);
+                        setAiStatus(`Error: ${payload?.message || 'unknown'}`);
+                        break;
+                }
+            };
+
+            worker.postMessage({ type: 'initialize' });
+        }
+
+        return () => {
+            if (workerRef.current) {
+                workerRef.current.terminate();
+                workerRef.current = null;
+            }
+            if (workerUrlRef.current) {
+                URL.revokeObjectURL(workerUrlRef.current);
+                workerUrlRef.current = null;
+            }
+        };
+    }, []);
+
+    // Load sources from localStorage on initial render
+    useEffect(() => {
+        try {
+            const storedSources = localStorage.getItem(SOURCES_STORAGE_KEY);
+            if (storedSources) {
+                setSources(JSON.parse(storedSources));
+            } else {
+                setSources([
+                    { id: 1, title: "Renewable Energy Report", content: "This report examines the growth of solar and wind power...", checked: true },
+                    { id: 2, title: "Company Policy Handbook", content: "Section 5.1 outlines the Work-From-Home policy...", checked: true },
+                ]);
+            }
+        } catch (error) { console.error("Failed to load sources", error); }
+    }, []);
+
+    // Save sources and trigger worker processing when sources change
+    useEffect(() => {
+        localStorage.setItem(SOURCES_STORAGE_KEY, JSON.stringify(sources));
+        if (workerRef.current && aiStatus === "AI Ready") {
+             setIsProcessingSources(true);
+             setAiStatus("Processing knowledge base...");
+             const toProcess = sources.filter(s => s.checked).map(s => ({ id: s.id, title: s.title, chunks: s.chunks || [s.content] }));
+             workerRef.current.postMessage({ type: 'process-sources', payload: { sources: toProcess } });
+        }
+    }, [sources]);
+
+    const handleAddSource = (newSource) => {
+        setSources(prev => [...prev, newSource]);
+    };
+
+    const isAiReady = aiStatus === "AI Ready";
+
+    return (
+        <div className="flex h-screen overflow-hidden bg-slate-50 text-slate-800 antialiased font-sans">
+            <Sidebar 
+                sources={sources} 
+                setSources={setSources}
+                onAddSourceClick={() => setIsModalOpen(true)}
+                aiStatus={aiStatus}
+            />
+            <ChatView 
+                chatHistory={chatHistory}
+                setChatHistory={setChatHistory}
+                worker={workerRef.current}
+                isAiReady={isAiReady}
+                isProcessingSources={isProcessingSources}
+                submissionDocument={submissionDocument}
+                setSubmissionDocument={setSubmissionDocument}
+            />
+            <AddSourceModal 
+                isOpen={isModalOpen} 
+                onClose={() => setIsModalOpen(false)} 
+                onAddSource={handleAddSource}
+            />
+        </div>
+    );
+}
+
+/* mount */
+const container = document.getElementById('root');
+const root = ReactDOM.createRoot(container);
+root.render(<App />);
+</script>
+</body>
+</html>
