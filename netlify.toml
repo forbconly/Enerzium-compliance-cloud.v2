@@ -1,0 +1,6 @@
+# This file tells Netlify how to build and deploy your site.
+
+[functions]
+  # This line tells Netlify to look for serverless functions
+  # in the "api" directory, which is where your proxy.js file is located.
+  directory = "api"
